@@ -1,6 +1,6 @@
 # resolve-clip-exporter
 
-**Exports each layer of a stacked DaVinci Resolve timeline to its own MP4, automatically.**
+**Delivery packaging automation: exports each layer of a stacked DaVinci Resolve timeline to its own named file, in one unattended batch.**
 
 When footage is stacked across several video tracks, Resolve has no one-click way to render each layer by itself. This CLI drives Resolve's scripting API to do it. It finds one clip per track, then "peels" the stack top-down: for each render it turns tracks and clips on and off so only the target layer shows, queues a render job, waits for it, and moves on. Afterwards it puts the timeline back exactly as it was.
 
