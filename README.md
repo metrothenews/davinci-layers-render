@@ -13,6 +13,14 @@ When footage is stacked across several video tracks, Resolve has no one-click wa
 
 **Stack:** Python 3.9+ · DaVinci Resolve scripting API · pytest
 
+## Applications at scale
+
+- **Asset preparation for compositing and VFX.** Per-layer renders are the handoff format for motion-graphics and compositing pipelines. This removes a manual, error-prone step from every delivery.
+- **Paired data for generative video.** An isolated layer alongside the full composite is the kind of aligned pair used to train and evaluate matting, layer-decomposition and inpainting models. This tool produces those pairs straight from real editing projects.
+- **A building block for agents.** It's one deterministic, self-restoring operation with a dry-run mode and a JSON result, which is the shape an AI agent needs for a tool it can call unattended.
+
+**What it demonstrates:** stateful automation with guaranteed cleanup, dependency inversion for testability, CLI and structured-output design.
+
 ## Requirements
 
 - DaVinci Resolve running with a project and timeline open, and external scripting enabled
