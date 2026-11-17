@@ -1,15 +1,22 @@
 # resolve-clip-exporter
 
-Python CLI for exporting selected DaVinci Resolve timeline clips to individual H.264 MP4 files with audio.
+**Exports each layer of a stacked DaVinci Resolve timeline to its own MP4, automatically.**
 
-This README is the handoff/state file for future sessions.
+When footage is stacked across several video tracks, Resolve has no one-click way to render each layer by itself. This CLI drives Resolve's scripting API to do it. It finds one clip per track, then "peels" the stack top-down: for each render it turns tracks and clips on and off so only the target layer shows, queues a render job, waits for it, and moves on. Afterwards it puts the timeline back exactly as it was.
+
+**Highlights**
+
+- **Safe by construction.** Track and clip enable states are recorded up front and restored in a `finally` block, even if a render fails or times out. It only touches render jobs it created itself.
+- **Works within API limits.** The public API can't move timeline items, so layers are isolated by masking tracks and clips cumulatively instead.
+- **Plan before acting.** `--dry-run` prints the clip plan without rendering. Every run writes a JSON summary of what was rendered, with paths and per-clip results.
+- **Tested without Resolve.** The Resolve API is behind a thin client, so selection, masking, state restore and render-config logic are unit-tested with fakes (`pytest`, 18 tests).
+
+**Stack:** Python 3.9+ · DaVinci Resolve scripting API · pytest
 
 ## Requirements
 
-- Python 3.9+
-- DaVinci Resolve running with a project and timeline open
-- Resolve scripting enabled
-- Environment variables configured:
+- DaVinci Resolve running with a project and timeline open, and external scripting enabled
+- Environment variables (macOS paths shown):
   - `RESOLVE_SCRIPT_API=/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting`
   - `RESOLVE_SCRIPT_LIB=/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.so`
   - `PYTHONPATH` includes `$RESOLVE_SCRIPT_API/Modules`
@@ -17,8 +24,8 @@ This README is the handoff/state file for future sessions.
 ## Usage
 
 ```bash
-.venv/bin/python app.py \
-  --output-dir /Volumes/Leverett/Downloads/test_video_clips \
+python app.py \
+  --output-dir ./exports \
   --max-clips 3 \
   --selection-mode first-per-track \
   --top-track-is highest-index \
@@ -27,78 +34,45 @@ This README is the handoff/state file for future sessions.
   --timeout-seconds 600
 ```
 
-### Dry run
+Preview the plan without rendering:
 
 ```bash
-.venv/bin/python app.py --dry-run
+python app.py --dry-run
 ```
 
-### Selection modes
+| Option | Meaning |
+|---|---|
+| `--selection-mode first-per-track` | First clip (by start frame) on each video track |
+| `--selection-mode at-timeline-start` | Clips that start exactly at the timeline start |
+| `--top-track-is highest-index` | Higher track numbers are upper layers (default) |
+| `--top-track-is lowest-index` | Lower track numbers are upper layers |
+| `--json-logs` | Structured JSON log output |
 
-- `first-per-track`: first clip by start frame on each video track
-- `at-timeline-start`: first clip whose start frame exactly matches timeline start frame
+## Behavior
 
-### Layer peel direction
+- Fails early if fewer than `--max-clips` eligible clips are found.
+- Renders layers top to bottom, with cumulative masks. For three tracks: `[1,2,3]`, then `[1,2]`, then `[1]`.
+- Restores video and audio track states, clip states, and (best effort) the Resolve page you were on.
+- Writes a JSON summary to stdout and to `<output-dir>/export_summary.json`.
 
-- `--top-track-is lowest-index`: treat smaller track numbers as higher layers
-- `--top-track-is highest-index`: treat larger track numbers as higher layers
+## Code layout
 
-## Behavior notes
+| File | Responsibility |
+|---|---|
+| `app.py` | CLI, logging, summary output |
+| `resolve_client.py` | Connection to the Resolve scripting API |
+| `timeline_reader.py` | Reads tracks and items and picks clips |
+| `export_runner.py` | Masks layers, queues render jobs, waits with a timeout |
+| `state_restore.py` | Snapshots and restores track and clip enable state |
+| `render_config.py`, `models.py` | Render settings and typed results |
 
-- Fails if fewer than `--max-clips` eligible clips are found.
-- Uses only jobs created by this script.
-- Restores video/audio track enable state in `finally`.
-- Best-effort restores Resolve page after export.
-- Writes JSON summary to stdout and `output_dir/export_summary.json`.
-
-## Current state (2026-03-19)
-
-- Core app and tests are implemented and passing.
-- Default layer peel direction is top-to-bottom (`--top-track-is highest-index`).
-- Latest validated run order was:
-  - `03_C0060_MP4`
-  - `02_C0061_MP4`
-  - `01_C0063_MP4`
-- Latest validated enabled-track masks were:
-  - first render: `[1, 2, 3]`
-  - second render: `[1, 2]`
-  - third render: `[1]`
-- Latest output folder in active use:
-  - `/Volumes/Leverett/Downloads/test_video_clips`
-
-## Important implementation decisions
-
-- Isolation is done by cumulative per-render masking of video tracks.
-- Isolation also applies clip-level enable/disable masking for timeline items on non-target tracks, then restores clip states in `finally`.
-- The "move clips out of range" strategy is intentionally not used because the public Resolve scripting API does not expose timeline position as a supported writable TimelineItem property.
-
-## Operational notes for future sessions
-
-- In Codex sandboxed runs, Resolve scripting socket access can fail even when Resolve is running.
-- If `scriptapp("Resolve")` returns `None` from sandbox, rerun the command with escalated permissions.
-- Keep these env vars set for external Python runs:
-  - `RESOLVE_SCRIPT_API`
-  - `RESOLVE_SCRIPT_LIB`
-  - `PYTHONPATH` with `$RESOLVE_SCRIPT_API/Modules`
-
-## Testing
+## Tests
 
 ```bash
-.venv/bin/python -m pytest -q
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
-Manual integration helper:
+`tests/integration_manual.py --output-dir ./exports` runs an end-to-end check against a live Resolve session.
 
-```bash
-.venv/bin/python tests/integration_manual.py --output-dir /Volumes/Leverett/Downloads/test_video_clips
-```
-
-## Resume checklist
-
-1. Run dry run and inspect clip plan:
-   - `.venv/bin/python app.py --dry-run --selection-mode at-timeline-start`
-2. Run full export:
-   - `.venv/bin/python app.py --output-dir /Volumes/Leverett/Downloads/test_video_clips --selection-mode at-timeline-start`
-3. Check summary:
-   - `/Volumes/Leverett/Downloads/test_video_clips/export_summary.json`
-4. Confirm masks/order from log lines (`enabled_video_tracks=...`) if behavior is in doubt.
+Note: if `scriptapp("Resolve")` returns `None` inside a sandboxed shell, the sandbox is blocking the local Resolve scripting socket. Run it from a normal terminal.
